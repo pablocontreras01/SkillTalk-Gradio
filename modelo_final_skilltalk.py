@@ -22,7 +22,7 @@ import os
 # ====================================================================
 
 # 🛑 1. RUTAS Y ARCHIVOS (AJUSTAR ESTO) 🛑
-MODEL_PATH = "mlp_lstm_ted_final.h5" 
+MODEL_PATH = "mlp_lstm_ted_final.h5"
 
 # 🛑 2. PARÁMETROS DEL MODELO Y PROCESAMIENTO 🛑
 CHUNK_SIZE = 30 # Tamaño de la secuencia que espera tu modelo (L_MAX).
