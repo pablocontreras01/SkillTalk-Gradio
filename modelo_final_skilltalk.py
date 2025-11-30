@@ -23,7 +23,7 @@ import os # Necesario para la función Gradio
 
 # 🛑 1. RUTAS Y ARCHIVOS (AJUSTAR ESTO) 🛑
 # **¡IMPORTANTE!** Usa la ruta del modelo re-guardado con TF 2.16.2
-MODEL_PATH = "/content/drive/MyDrive/Videos SkillTalk/mlp_lstm_tf216.h5" 
+MODEL_PATH = "mlp_lstm_ted_final.h5" 
 
 # Estos parámetros ya no son estáticos, los manejará la función de Gradio
 # VIDEO_PATH = None
