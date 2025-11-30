@@ -28,12 +28,11 @@ MODEL_PATH = "mlp_lstm_ted_final.h5"
 CHUNK_SIZE = 30 # Tamaño de la secuencia que espera tu modelo (L_MAX).
 CLASS_NAMES = ["Beat", "No-Gesture"] # Clases en el orden de salida del modelo
 COLORS = {
-    "Beat": (0, 255, 0),    # Verde (Gesto activo)
-    "No-Gesture": (255, 0, 0) # Azul (No-Gesture)
+    "Beat": (0, 255, 0),    # Verde (Gesto activo)
+    "No-Gesture": (255, 0, 0) # Azul (No-Gesture)
 }
 
 # ⚡ OPTIMIZACIÓN CLAVE: Factor de Salto de Fotogramas (Frames to Skip)
-# Solo procesa 1 de cada N fotogramas. Se recomienda 5 o 10.
 FRAME_SKIP_FACTOR = 5 
 
 # 🛑 3. CONSTANTES DEL ESQUELETO (Kinect v2) 🛑
@@ -321,7 +320,7 @@ def classify_and_visualize_video(video_path: str, model_path: str, class_names: 
         # Aplicar el color y etiqueta a todos los frames dentro del chunk
         for j in range(chunk_start_idx, chunk_end_idx):
             # Asegurar que no excedemos el número real de frames (T)
-            if j >= T: break 
+            if j >= T: break 
              
             data = frame_data_list[j]
             frame = data['frame'].copy() 
