@@ -2,6 +2,10 @@
 """
 Script Principal: Clasificación de Postura Corporal con Mediapipe, Normalización
 y Modelo MLP-LSTM. Adaptado para despliegue con Gradio.
+
+OPTIMIZACIÓN: Implementación de Salto de Fotogramas (Frame Skipping) 
+y uso de la menor complejidad del modelo MediaPipe (model_complexity=0)
+para acelerar el procesamiento en Gradio.
 """
 
 import cv2
@@ -11,34 +15,28 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 from typing import List, Optional, Dict, Tuple
 from collections import Counter
-import os # Necesario para la función Gradio
-
-# NOTA: En un entorno de Colab, debes ejecutar drive.mount('/content/drive')
-# drive.mount('/content/drive')
+import os
 
 # ====================================================================
 ## ⚙️ PARÁMETROS DE CONFIGURACIÓN
 # ====================================================================
 
 # 🛑 1. RUTAS Y ARCHIVOS (AJUSTAR ESTO) 🛑
-# **¡IMPORTANTE!** Usa la ruta del modelo re-guardado con TF 2.16.2
-MODEL_PATH = "mlp_lstm_ted_final.h5" 
-
-# Estos parámetros ya no son estáticos, los manejará la función de Gradio
-# VIDEO_PATH = None
-# OUTPUT_VIDEO_PATH = None 
+MODEL_PATH = "mlp_lstm_ted_final.h5" 
 
 # 🛑 2. PARÁMETROS DEL MODELO Y PROCESAMIENTO 🛑
 CHUNK_SIZE = 30 # Tamaño de la secuencia que espera tu modelo (L_MAX).
-CLASS_NAMES = ["Beat", "No-Gesture"] # Clases en el orden de salida del modelo (Índice 0, 1)
-# Colores en formato BGR (Blue, Green, Red) para OpenCV
+CLASS_NAMES = ["Beat", "No-Gesture"] # Clases en el orden de salida del modelo
 COLORS = {
-    "Beat": (0, 255, 0),    # Verde (Gesto activo)
-    "No-Gesture": (255, 0, 0) # Azul (No-Gesture)
+    "Beat": (0, 255, 0),    # Verde (Gesto activo)
+    "No-Gesture": (255, 0, 0) # Azul (No-Gesture)
 }
 
+# ⚡ OPTIMIZACIÓN CLAVE: Factor de Salto de Fotogramas (Frames to Skip)
+# Solo procesa 1 de cada N fotogramas. Se recomienda 5 o 10.
+FRAME_SKIP_FACTOR = 5 
+
 # 🛑 3. CONSTANTES DEL ESQUELETO (Kinect v2) 🛑
-# Necesarias para la normalización
 SPINE_BASE = 0; SPINE_MID = 1; NECK = 2; HEAD = 3
 SHOULDER_LEFT = 4; ELBOW_LEFT = 5; WRIST_LEFT = 6; HAND_LEFT = 7
 SHOULDER_RIGHT = 8; ELBOW_RIGHT = 9; WRIST_RIGHT = 10; HAND_RIGHT = 11
@@ -52,7 +50,7 @@ mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 
 # ====================================================================
-## 📏 FUNCIONES DE PREPROCESAMIENTO (IDÉNTICAS AL ENTRENAMIENTO)
+## 📏 FUNCIONES DE PREPROCESAMIENTO
 # ====================================================================
 
 def normalize_skeleton_sequence(seq: np.ndarray) -> np.ndarray:
@@ -175,55 +173,78 @@ def prepare_chunks_for_model(chunks_4d: np.ndarray) -> np.ndarray:
     return chunks_4d.reshape(N, chunk_len, J * C)
 
 
-## 💾 PROCESAMIENTO DE VIDEO Y EXTRACCIÓN
+## 💾 PROCESAMIENTO DE VIDEO Y EXTRACCIÓN (OPTIMIZADA)
 def process_video_to_kinect25_with_visuals(video_path: str, repeat_last_valid: bool = True) -> List[Dict]:
     """
     Lee el video, extrae esqueletos K25 y guarda el frame BGR y los pose_landmarks para visualización.
+    
+    ⚡ OPTIMIZACIÓN: Solo procesa el esqueleto cada FRAME_SKIP_FACTOR fotogramas.
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"No se pudo abrir el video: {video_path}")
 
-    pose = mp_pose.Pose(static_image_mode=False, model_complexity=1,
-                        enable_segmentation=False, min_detection_confidence=0.5,
-                        min_tracking_confidence=0.5)
+    # ⚡ OPTIMIZACIÓN: Usar model_complexity=0 (el más rápido)
+    pose = mp_pose.Pose(static_image_mode=False, model_complexity=0, 
+                         enable_segmentation=False, min_detection_confidence=0.5,
+                         min_tracking_confidence=0.5)
 
     frame_data = []
     last_valid_k25 = None
+    frame_count = 0 # Contador para el salto de fotogramas
 
-    print("→ Extrayendo frames, skeletons y landmarks (BGR)...")
+    print(f"→ Extrayendo frames, skeletons y landmarks (BGR) con FRAME_SKIP_FACTOR={FRAME_SKIP_FACTOR}...")
 
     while True:
-        ret, frame_bgr = cap.read() # <--- FRAME BGR ORIGINAL
+        ret, frame_bgr = cap.read() 
         if not ret: break
 
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB) # Para MediaPipe
-        res = pose.process(frame_rgb)
+        # Inicializar valores por defecto para el fotograma actual
+        current_pose_landmarks = None
+        current_k25 = np.zeros((25,3), dtype=np.float32)
 
-        current_pose_landmarks = res.pose_landmarks if res.pose_landmarks else None
-        current_k25 = None
+        # 🛑 LÓGICA DE SALTO DE FOTOGRAMAS 🛑
+        if frame_count % FRAME_SKIP_FACTOR == 0:
+            # Solo procesamos con MediaPipe en este fotograma
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB) 
+            res = pose.process(frame_rgb)
 
-        if res.pose_landmarks:
-            try:
-                current_k25 = extract_kinect25_from_mediapipe(res.pose_landmarks.landmark)
-                last_valid_k25 = current_k25
-            except Exception:
+            if res.pose_landmarks:
+                try:
+                    current_k25 = extract_kinect25_from_mediapipe(res.pose_landmarks.landmark)
+                    last_valid_k25 = current_k25.copy()
+                    current_pose_landmarks = res.pose_landmarks
+                except Exception:
+                    # Fallback a la última pose válida si falla la extracción, pero MP detectó algo
+                    if last_valid_k25 is not None and repeat_last_valid:
+                        current_k25 = last_valid_k25.copy()
+                    else:
+                        current_k25 = np.zeros((25,3), dtype=np.float32)
+            else:
+                # No se detectó pose, usamos la última válida
                 if last_valid_k25 is not None and repeat_last_valid:
                     current_k25 = last_valid_k25.copy()
                 else:
                     current_k25 = np.zeros((25,3), dtype=np.float32)
+
+        # 🛑 LÓGICA PARA FOTOGRAMAS SALTADOS 🛑
         else:
+            # Usamos la última pose válida para los frames saltados
             if last_valid_k25 is not None and repeat_last_valid:
                 current_k25 = last_valid_k25.copy()
             else:
                 current_k25 = np.zeros((25,3), dtype=np.float32)
-
+        
+        # Almacenar la información para todos los frames
         frame_data.append({
             'frame': frame_bgr,
             'k25': current_k25,
-            'pose_landmarks': current_pose_landmarks # Objeto completo de LandmarkList
+            # 'pose_landmarks' será None en frames saltados.
+            'pose_landmarks': current_pose_landmarks 
         })
-
+        
+        frame_count += 1
+        
     cap.release()
     pose.close()
     return frame_data
@@ -232,7 +253,7 @@ def process_video_to_kinect25_with_visuals(video_path: str, repeat_last_valid: b
 def draw_skeleton_and_label(image: np.ndarray, pose_landmarks, label: str, color: Tuple) -> np.ndarray:
     """Dibuja el esqueleto de MediaPipe y la etiqueta de clasificación."""
 
-    # Dibujar la pose de MediaPipe (sobre el frame BGR)
+    # Dibujar la pose de MediaPipe (solo si hay landmarks disponibles, es decir, no fue un frame saltado)
     if pose_landmarks:
         mp_drawing.draw_landmarks(
             image,
@@ -242,7 +263,7 @@ def draw_skeleton_and_label(image: np.ndarray, pose_landmarks, label: str, color
             connection_drawing_spec=mp_drawing.DrawingSpec(color=color, thickness=2, circle_radius=2)
         )
 
-    # Añadir la etiqueta textual
+    # Añadir la etiqueta textual (esto se hace en todos los frames del chunk)
     text = f"CLASE: {label}"
     cv2.putText(image, text, (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2, cv2.LINE_AA)
@@ -300,13 +321,13 @@ def classify_and_visualize_video(video_path: str, model_path: str, class_names: 
         # Aplicar el color y etiqueta a todos los frames dentro del chunk
         for j in range(chunk_start_idx, chunk_end_idx):
             # Asegurar que no excedemos el número real de frames (T)
-            if j >= T: break 
-            
+            if j >= T: break 
+             
             data = frame_data_list[j]
-            frame = data['frame'].copy() 
-            pose_landmarks = data['pose_landmarks']
+            frame = data['frame'].copy() 
+            pose_landmarks_to_draw = data['pose_landmarks']
 
-            visual_frame = draw_skeleton_and_label(frame, pose_landmarks, predicted_label, color)
+            visual_frame = draw_skeleton_and_label(frame, pose_landmarks_to_draw, predicted_label, color)
             visual_frames.append(visual_frame)
 
     return visual_frames
@@ -321,11 +342,11 @@ def classify_and_save_feedback_video(input_video_path: str, output_video_path: s
     Ejecuta el pipeline completo para clasificar un video y guardar el resultado.
     Retorna la ruta del video de salida.
     """
-    
+     
     print(f"\n--- INICIANDO PROCESAMIENTO ---")
     print(f"Input: {input_video_path}")
     print(f"Output: {output_video_path}")
-    
+     
     try:
         # 1. Ejecutar el pipeline que retorna la lista de frames visualizados
         visualized_frames = classify_and_visualize_video(
@@ -338,7 +359,9 @@ def classify_and_save_feedback_video(input_video_path: str, output_video_path: s
             fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Codec MP4
 
             cap = cv2.VideoCapture(input_video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30 
+            # Intentar obtener FPS, si no, usar 30
+            fps = cap.get(cv2.CAP_PROP_FPS) 
+            if fps <= 0: fps = 30 
             cap.release()
 
             out = cv2.VideoWriter(output_video_path, fourcc, fps, (W, H))
@@ -360,12 +383,3 @@ def classify_and_save_feedback_video(input_video_path: str, output_video_path: s
     except Exception as e:
         print(f"\n❌ Ocurrió un error inesperado: {e}")
         raise
-
-# ====================================================================
-## 🏁 BLOQUE DE EJECUCIÓN LOCAL (Comentado/Eliminado para Despliegue)
-# ====================================================================
-# if __name__ == "__main__":
-#     # Este bloque debe estar vacío o comentado para un despliegue web
-#     # ya que la ejecución la tomará el script app.py
-#     print("Script principal cargado exitosamente.")
-#     pass
