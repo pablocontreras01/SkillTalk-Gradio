@@ -4,7 +4,6 @@ Script Principal: Clasificaci√≥n de Postura Corporal con Mediapipe, Normalizaci√
 y Modelo MLP-LSTM. Adaptado para despliegue con Gradio.
 """
 
-from google.colab import drive
 import cv2
 import numpy as np
 import mediapipe as mp
