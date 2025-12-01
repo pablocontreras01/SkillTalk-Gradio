@@ -43,7 +43,7 @@ COLORS = {
 # ⚡ OPTIMIZACIÓN CLAVE (PARA VELOCIDAD Y MEMORIA): 
 # Factor de Salto de Fotogramas (Frames to Skip). 
 # Aumentado a 15 para un procesamiento mucho más rápido y menor uso de memoria.
-FRAME_SKIP_FACTOR = 15 
+FRAME_SKIP_FACTOR = 5 
 
 # 🛑 3. CONSTANTES DEL ESQUELETO (Kinect v2)
 SPINE_BASE = 0; SPINE_MID = 1; NECK = 2; HEAD = 3
