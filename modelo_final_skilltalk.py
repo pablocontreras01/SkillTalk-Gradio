@@ -30,7 +30,7 @@ except ImportError:
 # ====================================================================
 
 # 🛑 1. RUTAS Y ARCHIVOS
-MODEL_PATH = "mlp_lstm_ted_final.h5"
+MODEL_PATH = "mlp_lstm_ted_finalv2.h5"
 
 # 🛑 2. PARÁMETROS DEL MODELO Y PROCESAMIENTO
 CHUNK_SIZE = 30 
